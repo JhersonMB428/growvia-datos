@@ -11,6 +11,7 @@ from . import config, db
 from .normalizar import nombre_propio, solo_digitos, telefono, texto
 
 ENDPOINTS = {
+    'empresa': '/ruc',  # solo si el RUC no está en el padrón (se escribió a mano)
     'representantes': '/ruc-representantes',
     'contacto': '/ruc-contacto',
     'trabajadores': '/ruc-trabajadores',
@@ -114,6 +115,18 @@ def representantes(d) -> list[dict]:
             'prioridad': _prioridad(r),
         })
     return sorted(salida, key=lambda x: (x['prioridad'], x['desde'] or '9999'))
+
+
+def empresa(d) -> dict | None:
+    """Datos básicos con la misma forma que el padrón (para RUC escritos a mano)"""
+    d = d[0] if isinstance(d, list) and d else d
+    if not isinstance(d, dict):
+        return None
+    u = d.get('ubigeo')
+    ubigeo = solo_digitos(u.get('ubigeo') if isinstance(u, dict) else u).zfill(6) if u else ''
+    return {'ruc': solo_digitos(d.get('ruc')), 'razon': texto(d.get('nombre_o_razon_social') or d.get('razon_social')),
+            'estado': texto(d.get('estado')).upper(), 'condicion': texto(d.get('condicion')).upper(),
+            'ubigeo': ubigeo, 'direccion': texto(d.get('direccion'))}
 
 
 def contacto(d) -> dict:

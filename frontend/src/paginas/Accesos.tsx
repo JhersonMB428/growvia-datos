@@ -5,13 +5,13 @@ import { useSesion } from '../sesion';
 const ACCIONES: Record<string, string> = {
   INGRESO: 'Entró', INGRESO_SIN_ACCESO: 'Intentó entrar sin acceso', ACCESO_DADO: 'Dio acceso', ACCESO_CAMBIADO: 'Cambió un acceso',
   BASE_SUBIDA: 'Subió una base', BASE_BORRADA: 'Borró una base', CONSULTA_INICIADA: 'Inició una consulta a SUNAT',
-  CONSULTA_TERMINADA: 'Terminó una consulta a SUNAT', EXCEL_DESCARGADO: 'Descargó un Excel', PADRON_ACTUALIZADO: 'Actualizó el padrón',
+  CONSULTA_TERMINADA: 'Terminó una consulta a SUNAT', EXCEL_DESCARGADO: 'Descargó un Excel', PADRON_ACTUALIZADO: 'Actualizó el padrón', RUC_CAMBIADO: 'Cambió el RUC de una empresa',
 };
 
 function resumen(a: Actividad) {
   const d = a.detalle ?? {};
   const partes = [d.email, d.rol && `rol ${d.rol}`, d.activo === false && 'desactivado', d.activo === true && 'activado', d.archivo, d.filas && `${d.filas} filas`,
-    d.empresas && `${d.empresas} empresas`, d.consultas && `${d.consultas} consultas`, d.nombre];
+    d.antes && `${d.antes} → ${d.ruc}`, d.empresas && `${d.empresas} empresas`, d.consultas && `${d.consultas} consultas`, d.nombre];
   return partes.filter(Boolean).join(' · ');
 }
 

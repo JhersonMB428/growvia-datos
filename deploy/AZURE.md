@@ -23,10 +23,13 @@ psql "host=growviabd-eastus.postgres.database.azure.com port=5432 dbname=postgre
 CREATE ROLE datos_app LOGIN PASSWORD '$DB_PASS';
 GRANT datos_app TO admingrowvia;
 CREATE DATABASE growvia_datos OWNER datos_app;
+\\c growvia_datos
+ALTER SCHEMA public OWNER TO datos_app;
+GRANT ALL ON SCHEMA public TO datos_app;
 SQL
 DB_URL="postgresql://datos_app:${DB_PASS}@growviabd-eastus.postgres.database.azure.com:5432/growvia_datos?sslmode=require"
 ```
-Las tablas se crean solas cuando la app arranca.
+Las tablas se crean solas cuando la app arranca. Si al arrancar sale `permission denied for schema public`, falta el `ALTER SCHEMA` de arriba (en Azure la base nueva deja el esquema `public` a nombre del admin).
 
 ## 2. Juntar los secretos (sin mostrarlos)
 ```bash
