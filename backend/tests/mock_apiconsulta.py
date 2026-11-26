@@ -20,6 +20,13 @@ def _token(authorization: str | None):
         raise HTTPException(401, 'token')
 
 
+@app.post('/ruc')
+def ruc(c: Cuerpo, authorization: str | None = Header(None)):
+    _token(authorization)
+    return {'success': True, 'data': {'ruc': int(c.ruc), 'nombre_o_razon_social': f'EMPRESA MANUAL {c.ruc[-4:]} SAC', 'estado': 'ACTIVO',
+                                      'condicion': 'HABIDO', 'direccion': 'AV. AREQUIPA 123', 'ubigeo': {'ubigeo': 150122, 'distrito': 'MIRAFLORES'}}}
+
+
 @app.post('/ruc-representantes')
 def representantes(c: Cuerpo, authorization: str | None = Header(None)):
     _token(authorization)

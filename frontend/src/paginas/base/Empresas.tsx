@@ -7,7 +7,7 @@ const SEGMENTOS = ['Micro', 'Pequeña', 'Mediana', 'Grande'];
 const POR_PAGINA = 50;
 const sinTildes = (t: string) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
-export function Empresas({ trabajo, onCambio }: { trabajo: Trabajo; onCambio: (f: Fila) => void }) {
+export function Empresas({ trabajo, onCambio, onRecargar }: { trabajo: Trabajo; onCambio: (f: Fila) => void; onRecargar: () => void }) {
   const [busca, setBusca] = useState('');
   const [segmento, setSegmento] = useState('todos');
   const [filtro, setFiltro] = useState('todas');
@@ -85,7 +85,7 @@ export function Empresas({ trabajo, onCambio }: { trabajo: Trabajo; onCambio: (f
                   <td>{f.faltan.length ? <span className="chip chip--ambar" title={f.faltan.join(', ')}>{f.faltan.length}</span> : <span className="chip chip--ok">✓</span>}</td>
                 </tr>
                 {abierta === f.id && (
-                  <tr><td colSpan={11} style={{ background: '#fbfdf8' }}><Editor trabajoId={trabajo.id} fila={f} onCambio={onCambio} onCerrar={() => setAbierta(null)} /></td></tr>
+                  <tr><td colSpan={11} style={{ background: '#fbfdf8' }}><Editor trabajoId={trabajo.id} fila={f} onCambio={onCambio} onCerrar={() => setAbierta(null)} onRecargar={onRecargar} /></td></tr>
                 )}
               </Fragment>
             ))}
@@ -104,7 +104,7 @@ export function Empresas({ trabajo, onCambio }: { trabajo: Trabajo; onCambio: (f
   );
 }
 
-function Editor({ trabajoId, fila, onCambio, onCerrar }: { trabajoId: string; fila: Fila; onCambio: (f: Fila) => void; onCerrar: () => void }) {
+function Editor({ trabajoId, fila, onCambio, onCerrar, onRecargar }: { trabajoId: string; fila: Fila; onCambio: (f: Fila) => void; onCerrar: () => void; onRecargar: () => void }) {
   const f = fila.final;
   const d = fila.datos;
   const reps = fila.representantes;
@@ -159,6 +159,7 @@ function Editor({ trabajoId, fila, onCambio, onCerrar }: { trabajoId: string; fi
             {f.direccion && <><br />{f.direccion} · {[f.distrito, f.provincia, f.departamento].filter(Boolean).join(', ')}</>}
             {f.nombre_archivo && f.nombre_archivo !== f.razon && <><br />En el archivo: {f.nombre_archivo}</>}
           </p>
+          <CambiarRuc trabajoId={trabajoId} fila={fila} onListo={() => { onCerrar(); onRecargar(); }} />
         </div>
 
         <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -232,6 +233,45 @@ function Editor({ trabajoId, fila, onCambio, onCerrar }: { trabajoId: string; fi
           <button type="button" className="boton boton--chico" disabled={ocupado} onClick={guardar}>{ocupado ? 'Guardando…' : 'Guardar'}</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Corregir un RUC mal elegido (o recuperar una empresa descartada) */
+function CambiarRuc({ trabajoId, fila, onListo }: { trabajoId: string; fila: Fila; onListo: () => void }) {
+  const [abierto, setAbierto] = useState(fila.rucEstado === 'DESCARTADA');
+  const [ruc, setRuc] = useState('');
+  const [error, setError] = useState('');
+  const [ocupado, setOcupado] = useState(false);
+  const descartada = fila.rucEstado === 'DESCARTADA';
+
+  async function enviar(cuerpo: { ruc?: string; descartar?: boolean }) {
+    if (cuerpo.descartar && !confirm('¿Descartar esta empresa? No se consultará ni saldrá en el Excel.')) return;
+    setError(''); setOcupado(true);
+    try { await api(`/trabajos/${trabajoId}/filas/${fila.id}/ruc`, { cuerpo }); onListo(); }
+    catch (e) { setError(textoError(e)); setOcupado(false); }
+  }
+
+  if (!abierto) {
+    return (
+      <div className="fila" style={{ marginTop: 6 }}>
+        <button type="button" className="boton-texto" onClick={() => setAbierto(true)}>¿RUC equivocado? Cambiar RUC</button>
+      </div>
+    );
+  }
+  return (
+    <div className="nota" style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <span>{descartada ? 'Esta empresa está descartada. Para recuperarla, escribe su RUC.' : 'Escribe el RUC correcto. Se borran los datos de SUNAT del RUC anterior y la empresa vuelve a quedar por consultar.'}</span>
+      <div className="fila">
+        <label className="oculto-visual" htmlFor={`nuevo-ruc-${fila.id}`}>RUC correcto</label>
+        <input id={`nuevo-ruc-${fila.id}`} className="entrada entrada--chica numeros" style={{ maxWidth: 170 }} inputMode="numeric" maxLength={11}
+          placeholder="RUC de 11 dígitos" value={ruc} onChange={(e) => setRuc(e.target.value.replace(/\D/g, '').slice(0, 11))} />
+        <button type="button" className="boton boton--chico" disabled={ocupado || ruc.length !== 11} onClick={() => enviar({ ruc })}>Usar este RUC</button>
+        {!descartada && <button type="button" className="boton-2 boton--chico" disabled={ocupado} onClick={() => enviar({ descartar: true })}>Descartar empresa</button>}
+        <a href="https://e-consultaruc.sunat.gob.pe/cl-ti-itmrconsruc/FrameCriterioBusquedaWeb.jsp" target="_blank" rel="noopener noreferrer" style={{ fontSize: 13 }}>Buscar en SUNAT ↗</a>
+        {!descartada && <button type="button" className="boton-texto" onClick={() => setAbierto(false)}>Cancelar</button>}
+      </div>
+      {error && <div className="alerta" role="alert">{error}</div>}
     </div>
   );
 }

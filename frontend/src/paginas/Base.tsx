@@ -126,7 +126,7 @@ export function Base() {
           </div>
           {activa === 'ruc' && <RevisarRuc trabajo={t} onCambio={actualizarFila} onListo={() => setPestana('sunat')} />}
           {activa === 'sunat' && <ConsultarSunat trabajo={t} onIniciada={() => { cargar(); setPestana('empresas'); }} />}
-          {activa === 'empresas' && <Empresas trabajo={t} onCambio={actualizarFila} />}
+          {activa === 'empresas' && <Empresas trabajo={t} onCambio={actualizarFila} onRecargar={cargar} />}
           {activa === 'descargar' && <Descargar trabajo={t} onDescargado={() => setTimeout(cargar, 1500)} />}
         </div>
       )}

@@ -179,11 +179,15 @@ def consultar(tid: str, usuario_id: int):
     try:
         t = db.uno('SELECT endpoints FROM trabajos WHERE id = %s', (tid,))
         endpoints = t['endpoints'] or list(apiconsulta.ENDPOINTS)
-        filas = db.todos("SELECT id, ruc, sunat FROM filas WHERE trabajo_id = %s AND NOT consultada AND (datos->>'_consultar')::boolean ORDER BY n", (tid,))
+        filas = db.todos("SELECT id, ruc, sunat, padron FROM filas WHERE trabajo_id = %s AND NOT consultada AND (datos->>'_consultar')::boolean ORDER BY n", (tid,))
         _estado(tid, 'CONSULTANDO', 'Consultando SUNAT…', 0, len(filas))
         with httpx.Client(timeout=25) as cliente:
             for i, f in enumerate(filas, start=1):
                 s = dict(f['sunat'] or {})
+                if not f['padron']:  # RUC escrito a mano: razón social, estado y ubicación desde SUNAT
+                    e = apiconsulta.empresa(apiconsulta.consultar(cliente, f['ruc'], 'empresa', usuario_id, tid))
+                    if e and e.get('razon'):
+                        db.ejecutar('UPDATE filas SET padron = %s WHERE id = %s', (db.j(e), f['id']))
                 if 'representantes' in endpoints:
                     s['representantes'] = apiconsulta.representantes(apiconsulta.consultar(cliente, f['ruc'], 'representantes', usuario_id, tid))
                 if 'contacto' in endpoints:
@@ -302,8 +306,11 @@ def elegir_ruc(tid: str, fid: int, dto: ElegirRuc, u: dict = Depends(usuario_act
     dato = next((x for x in f['opciones'] if x['ruc'] == ruc), None)
     cambio = ruc != f['ruc']
     db.ejecutar("UPDATE filas SET ruc = %s, ruc_estado = 'ELEGIDO', padron = COALESCE(%s, CASE WHEN %s THEN NULL ELSE padron END), "
-                "consultada = consultada AND NOT %s, sunat = CASE WHEN %s THEN NULL ELSE sunat END WHERE id = %s",
-                (ruc, db.j(dato) if dato else None, cambio, cambio, cambio, fid))
+                "consultada = consultada AND NOT %s, sunat = CASE WHEN %s THEN NULL ELSE sunat END, "
+                "datos = CASE WHEN %s THEN datos - 'rep' - 'representante' - 'dni' - 'cargo' ELSE datos END WHERE id = %s",
+                (ruc, db.j(dato) if dato else None, cambio, cambio, cambio, cambio, fid))
+    if cambio and f['ruc']:
+        db.registrar(u['id'], 'RUC_CAMBIADO', {'trabajo': tid, 'fila': fid, 'antes': f['ruc'], 'ruc': ruc})
     return {'ok': True}
 
 
@@ -328,11 +335,11 @@ def iniciar_consulta(tid: str, dto: Consulta, u: dict = Depends(usuario_actual))
     t = _trabajo(tid)
     if t['estado'] not in ('REVISAR_RUC', 'REVISION'):
         raise HTTPException(400, 'Espera a que termine el paso anterior')
-    endpoints = [e for e in dto.endpoints if e in apiconsulta.ENDPOINTS]
+    endpoints = [e for e in dto.endpoints if e in apiconsulta.ENDPOINTS and e != 'empresa']
     if not endpoints:
         raise HTTPException(400, 'Elige al menos un dato para consultar')
     filas = _por_consultar(tid, dto)
-    gasto = sum(len(apiconsulta.faltan(f['ruc'], endpoints)) for f in filas)
+    gasto = sum(len(apiconsulta.faltan(f['ruc'], endpoints + ([] if f['padron'] else ['empresa']))) for f in filas)
     usadas = apiconsulta.usadas_mes()
     quedan = max(0, config.APICONSULTA_LIMITE_MES - usadas)
     estimado = {'empresas': len(filas), 'consultas': gasto, 'usadasMes': usadas, 'limiteMes': config.APICONSULTA_LIMITE_MES,
