@@ -97,7 +97,7 @@ def final(f: dict) -> dict:
         'estado_sunat': ' · '.join(x for x in (p.get('estado') or o.get('estado', '').upper(), p.get('condicion') or o.get('condicion', '').upper()) if x),
         'activo': (p.get('estado') or o.get('estado', '').upper() or 'ACTIVO') == 'ACTIVO',
         'otros_telefonos': [t for t in tels if t != tel][:4], 'otros_correos': [c for c in correos if c != cor][:3],
-        'direccion': p.get('direccion', ''), 'nombre_archivo': o.get('razon', ''),
+        'direccion': p.get('direccion', ''), 'nombre_archivo': o.get('razon', ''), 'tipo': o.get('tipo', '').upper(),
         'como_ruc': ETIQUETA_RUC.get(f['ruc_estado'] or '', ''), 'observacion': d.get('observacion', ''),
         'extra': f['extra'] or {},
     }
@@ -305,7 +305,7 @@ def elegir_ruc(tid: str, fid: int, dto: ElegirRuc, u: dict = Depends(usuario_act
     if not f:
         raise HTTPException(404, 'La fila no existe')
     if dto.descartar:
-        db.ejecutar("UPDATE filas SET ruc_estado = 'DESCARTADA' WHERE id = %s", (fid,))
+        db.ejecutar("UPDATE filas SET datos = datos || jsonb_build_object('_antes', ruc_estado), ruc_estado = 'DESCARTADA' WHERE id = %s AND ruc_estado <> 'DESCARTADA'", (fid,))
         return {'ok': True}
     ruc = solo_digitos(dto.ruc)
     if not ruc_valido(ruc):
@@ -314,11 +314,32 @@ def elegir_ruc(tid: str, fid: int, dto: ElegirRuc, u: dict = Depends(usuario_act
     cambio = ruc != f['ruc']
     db.ejecutar("UPDATE filas SET ruc = %s, ruc_estado = 'ELEGIDO', padron = COALESCE(%s, CASE WHEN %s THEN NULL ELSE padron END), "
                 "consultada = consultada AND NOT %s, sunat = CASE WHEN %s THEN NULL ELSE sunat END, "
-                "datos = CASE WHEN %s THEN datos - 'rep' - 'representante' - 'dni' - 'cargo' ELSE datos END WHERE id = %s",
+                "datos = (CASE WHEN %s THEN datos - 'rep' - 'representante' - 'dni' - 'cargo' ELSE datos END) - '_antes' WHERE id = %s",
                 (ruc, db.j(dato) if dato else None, cambio, cambio, cambio, cambio, fid))
     if cambio and f['ruc']:
         db.registrar(u['id'], 'RUC_CAMBIADO', {'trabajo': tid, 'fila': fid, 'antes': f['ruc'], 'ruc': ruc})
     return {'ok': True}
+
+
+class DescartarVarias(BaseModel):
+    ids: list[int]
+    descartar: bool = True
+
+
+@router.post('/trabajos/{tid}/descartar')
+def descartar_varias(tid: str, dto: DescartarVarias, u: dict = Depends(usuario_actual)):
+    """Descartar (o recuperar) varias empresas de una vez, p. ej. todas las instituciones públicas"""
+    _trabajo(tid)
+    if not dto.ids or len(dto.ids) > 20000:
+        raise HTTPException(400, 'Elige qué empresas')
+    if dto.descartar:
+        n = db.uno("""WITH c AS (UPDATE filas SET datos = datos || jsonb_build_object('_antes', ruc_estado), ruc_estado = 'DESCARTADA'
+                    WHERE trabajo_id = %s AND id = ANY(%s) AND ruc_estado <> 'DESCARTADA' RETURNING 1) SELECT count(*) AS n FROM c""", (tid, dto.ids))
+    else:
+        n = db.uno("""WITH c AS (UPDATE filas SET ruc_estado = COALESCE(datos->>'_antes', CASE WHEN ruc IS NULL THEN 'NO_ENCONTRADO' ELSE 'ELEGIDO' END),
+                    datos = datos - '_antes' WHERE trabajo_id = %s AND id = ANY(%s) AND ruc_estado = 'DESCARTADA' RETURNING 1) SELECT count(*) AS n FROM c""", (tid, dto.ids))
+    db.registrar(u['id'], 'EMPRESAS_DESCARTADAS' if dto.descartar else 'EMPRESAS_RECUPERADAS', {'trabajo': tid, 'empresas': n['n']})
+    return {'empresas': n['n']}
 
 
 class Consulta(BaseModel):

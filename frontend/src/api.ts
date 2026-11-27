@@ -42,7 +42,7 @@ export type Final = {
   ruc: string; razon: string; representante: string; dni: string; cargo: string; telefono: string; correo: string;
   departamento: string; provincia: string; distrito: string; lineas: number | null; operador: string; lineas_por: Record<string, number>;
   segmento: string; segmento_estimado: string; trabajadores: number | null; periodo: string; estado_sunat: string; activo: boolean;
-  otros_telefonos: string[]; otros_correos: string[]; direccion: string; nombre_archivo: string; como_ruc: string; observacion: string;
+  otros_telefonos: string[]; otros_correos: string[]; direccion: string; nombre_archivo: string; tipo: string; como_ruc: string; observacion: string;
 };
 export type Fila = {
   id: number; n: number; rucEstado: EstadoRuc; opciones: OpcionRuc[]; consultada: boolean; representantes: Representante[];
