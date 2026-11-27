@@ -25,6 +25,7 @@ ALIAS = {
     'lineas_entel': ['LINEAS ENTEL', 'ENTEL'], 'lineas_bitel': ['LINEAS BITEL', 'BITEL'],
     'segmento': ['SEGMENTO', 'TAMANO', 'TIPO DE EMPRESA'],
     'estado': ['ESTADO', 'ESTADO DEL CONTRIBUYENTE', 'ESTADO SUNAT'],
+    'tipo': ['TIPO DE CONTRIBUYENTE', 'TIPO CONTRIBUYENTE', 'TIPO DE SOCIEDAD'],
     'condicion': ['CONDICION', 'CONDICION DEL CONTRIBUYENTE', 'CONDICION DE DOMICILIO'],
 }
 
@@ -90,8 +91,14 @@ def leer(contenido: bytes) -> tuple[list[dict], list[str]]:
 COLUMNAS_CRM = ['RUC', 'RAZÓN SOCIAL', 'REPRESENTANTEL LEGAL SUNAT', 'DNI', 'TELEFONO', 'CORREO',
                 'DEPARTAMENTO', 'PROVINCIA', 'DISTRITO', 'CANTIDAD DE LÍNEAS', 'OPERADOR']
 CONTROL = ['SEGMENTO', 'TRABAJADORES', 'PERIODO TRABAJADORES'] + [f'LÍNEAS {o.upper()}' for o in OPERADORES] + \
-          ['ESTADO SUNAT', 'CARGO DEL REPRESENTANTE', 'OTROS TELÉFONOS', 'OTROS CORREOS', 'DIRECCIÓN',
+          ['ESTADO SUNAT', 'TIPO DE CONTRIBUYENTE', 'CARGO DEL REPRESENTANTE', 'OTROS CONTACTOS', 'OTROS TELÉFONOS', 'OTROS CORREOS', 'DIRECCIÓN',
            'NOMBRE EN EL ARCHIVO', 'CÓMO SE ENCONTRÓ EL RUC', 'OBSERVACIÓN']
+
+
+def texto_contactos(contactos: list[dict]) -> str:
+    """Una persona por línea: Nombre | Cargo | DNI | Teléfono | Correo (el CRM lo lee al cargar la base)"""
+    return '\n'.join(' | '.join([k['nombre'], k.get('cargo', ''), k.get('dni', ''), k.get('telefono', ''), k.get('correo', '')]).rstrip(' |')
+                     for k in contactos if k.get('nombre'))
 
 
 def generar(filas: list[dict], extras: list[str]) -> bytes:
@@ -105,7 +112,8 @@ def generar(filas: list[dict], extras: list[str]) -> bytes:
                      f['departamento'], f['provincia'], f['distrito'], f['lineas'] if f['lineas'] is not None else '', f['operador'],
                      f['segmento'], f['trabajadores'] if f['trabajadores'] is not None else '', f['periodo'],
                      *[f['lineas_por'].get(o.lower()) if f['lineas_por'].get(o.lower()) is not None else '' for o in OPERADORES],
-                     f['estado_sunat'], f['cargo'], ', '.join(f['otros_telefonos']), ', '.join(f['otros_correos']), f['direccion'],
+                     f['estado_sunat'], f['tipo'], f['cargo'], texto_contactos(f['otros_contactos']), ', '.join(f['otros_telefonos']),
+                     ', '.join(f['otros_correos']), f['direccion'],
                      f['nombre_archivo'], f['como_ruc'], f['observacion']]
                     + [f['extra'].get(x, '') for x in extras])
     verde, gris = PatternFill('solid', fgColor='013936'), PatternFill('solid', fgColor='5B6B69')
@@ -114,12 +122,14 @@ def generar(filas: list[dict], extras: list[str]) -> bytes:
         celda.fill = verde if i < len(COLUMNAS_CRM) else gris
         celda.alignment = Alignment(wrap_text=True, vertical='center')
     hoja.row_dimensions[1].height = 32
-    anchos = [13, 42, 34, 11, 12, 30, 14, 16, 20, 11, 11, 11, 12, 12, 10, 10, 10, 10, 18, 24, 24, 28, 44, 40, 22, 30]
+    anchos = [13, 42, 34, 11, 12, 30, 14, 16, 20, 11, 11, 11, 12, 12, 10, 10, 10, 10, 18, 26, 24, 60, 28, 34, 44, 40, 22, 30]
     for i, ancho in enumerate(anchos + [18] * len(extras), start=1):
         hoja.column_dimensions[get_column_letter(i)].width = ancho
+    col_contactos = len(COLUMNAS_CRM) + CONTROL.index('OTROS CONTACTOS')
     for fila in hoja.iter_rows(min_row=2):
         for c in (fila[0], fila[3], fila[4]):
             c.number_format = '@'
+        fila[col_contactos].alignment = Alignment(wrap_text=True, vertical='top')
     hoja.freeze_panes = 'C2'
     hoja.auto_filter.ref = hoja.dimensions
     salida = io.BytesIO()

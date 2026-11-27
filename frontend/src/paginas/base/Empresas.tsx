@@ -5,12 +5,24 @@ import { ChipRuc } from '../comunes';
 const OPERADORES = ['movistar', 'claro', 'entel', 'bitel'];
 const SEGMENTOS = ['Micro', 'Pequeña', 'Mediana', 'Grande'];
 const POR_PAGINA = 50;
+// Tipos de contribuyente que sí son empresas privadas
+const SOCIEDADES = ['SOCIEDAD ANONIMA', 'SOCIEDAD COMERCIAL', 'SOCIEDAD CIVIL', 'EMPRESA INDIVIDUAL', 'SOCIEDAD IRREGULAR', 'SUCURSALES O AG. DE EMP. EXTRANJ', 'PERSONA NATURAL CON NEGOCIO'];
 const sinTildes = (t: string) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 export function Empresas({ trabajo, onCambio, onRecargar }: { trabajo: Trabajo; onCambio: (f: Fila) => void; onRecargar: () => void }) {
   const [busca, setBusca] = useState('');
   const [segmento, setSegmento] = useState('todos');
   const [filtro, setFiltro] = useState('todas');
+  const [tipo, setTipo] = useState('');
+  const [aviso, setAviso] = useState('');
+  const [ocupado, setOcupado] = useState(false);
+  // Tipos de contribuyente (si el archivo los trae, p. ej. la consulta masiva de SUNAT)
+  const tipos = useMemo(() => {
+    const c = new Map<string, number>();
+    trabajo.filas.forEach((f) => { if (f.final.tipo) c.set(f.final.tipo, (c.get(f.final.tipo) ?? 0) + 1); });
+    return [...c.entries()].sort((a, b) => b[1] - a[1]);
+  }, [trabajo.filas]);
+  const conTipo = tipos.length > 0;
   const [pagina, setPagina] = useState(0);
   const [abierta, setAbierta] = useState<number | null>(null);
 
@@ -22,6 +34,9 @@ export function Empresas({ trabajo, onCambio, onRecargar }: { trabajo: Trabajo; 
       if (filtro === 'faltan' && !f.faltan.length) return false;
       if (filtro === 'sin-lineas' && f.final.lineas !== null) return false;
       if (filtro === 'sin-consultar' && f.consultada) return false;
+      if (tipo === '_no_privadas' && SOCIEDADES.some((x) => f.final.tipo.includes(x))) return false;
+      if (tipo === '_no_privadas' && !f.final.tipo) return false;
+      if (tipo && tipo !== '_no_privadas' && f.final.tipo !== tipo) return false;
       const s = f.final.segmento;
       if (segmento === 'micro' && s !== 'Micro') return false;
       if (segmento === 'pyme' && s !== 'Pequeña' && s !== 'Mediana') return false;
@@ -29,7 +44,19 @@ export function Empresas({ trabajo, onCambio, onRecargar }: { trabajo: Trabajo; 
       if (segmento === 'sin' && s) return false;
       return !q || sinTildes(`${f.final.ruc} ${f.final.razon} ${f.final.nombre_archivo} ${f.final.representante}`).includes(q);
     });
-  }, [trabajo.filas, busca, segmento, filtro]);
+  }, [trabajo.filas, busca, segmento, filtro, tipo]);
+
+  async function descartarTodas(descartar: boolean) {
+    const n = filas.length;
+    if (!confirm(descartar ? `¿Descartar las ${n} empresas de este filtro? No se consultarán ni saldrán en el Excel. Se pueden recuperar después.` : `¿Recuperar las ${n} empresas descartadas de este filtro?`)) return;
+    setOcupado(true); setAviso('');
+    try {
+      const r = await api<{ empresas: number }>(`/trabajos/${trabajo.id}/descartar`, { cuerpo: { ids: filas.map((f) => f.id), descartar } });
+      setAviso(descartar ? `Se descartaron ${r.empresas} empresas.` : `Se recuperaron ${r.empresas} empresas.`);
+      onRecargar();
+    } catch (e) { setAviso(textoError(e)); }
+    finally { setOcupado(false); }
+  }
 
   const paginas = Math.max(1, Math.ceil(filas.length / POR_PAGINA));
   const visibles = filas.slice(pagina * POR_PAGINA, (pagina + 1) * POR_PAGINA);
@@ -53,15 +80,31 @@ export function Empresas({ trabajo, onCambio, onRecargar }: { trabajo: Trabajo; 
           <option value="sin-consultar">Sin consultar en SUNAT</option>
           <option value="descartadas">Descartadas</option>
         </select>
+        {conTipo && (
+          <select className="selector" style={{ maxWidth: 360 }} aria-label="Tipo de contribuyente" value={tipo} onChange={(e) => cambiaFiltro(setTipo)(e.target.value)}>
+            <option value="">Todos los tipos de contribuyente</option>
+            <option value="_no_privadas">Todas las que no son empresas privadas (públicas, asociaciones, sindicatos…)</option>
+            {tipos.map(([t, n]) => <option key={t} value={t}>{t} ({n})</option>)}
+          </select>
+        )}
         <span className="tenue numeros" style={{ marginLeft: 'auto', fontSize: 13 }}>{filas.length} empresas</span>
       </div>
+      {(tipo || filtro === 'descartadas') && filas.length > 0 && (
+        <div className="nota fila fila--entre">
+          <span>{filtro === 'descartadas' ? `${filas.length} empresas descartadas con este filtro.` : `${filas.length} empresas con este filtro. Si no les sirven como clientes, descártalas antes de consultar para no gastar consultas.`}</span>
+          <button type="button" className="boton-2 boton--chico" disabled={ocupado} onClick={() => descartarTodas(filtro !== 'descartadas')}>
+            {filtro === 'descartadas' ? `Recuperar estas ${filas.length}` : `Descartar estas ${filas.length}`}
+          </button>
+        </div>
+      )}
+      {aviso && <div className="aviso" role="status">{aviso}</div>}
       <p className="tenue" style={{ fontSize: 13 }}>Haz clic en una empresa para elegir el representante, corregir datos, marcar el segmento y anotar sus líneas por operador.</p>
 
       <div className="tabla-caja">
         <table className="tabla">
           <thead>
             <tr>
-              <th>Fila</th><th>RUC</th><th>Razón social</th><th>Representante</th><th>DNI</th><th>Teléfono</th>
+              <th>Fila</th><th>RUC</th><th>Razón social</th>{conTipo && <th>Tipo</th>}<th>Representante</th><th>DNI</th><th>Teléfono</th>
               <th>Distrito</th><th>Segmento</th><th className="celda-num">Líneas</th><th>Operador</th><th>Falta</th>
             </tr>
           </thead>
@@ -74,7 +117,9 @@ export function Empresas({ trabajo, onCambio, onRecargar }: { trabajo: Trabajo; 
                   <td className="numeros tenue">{f.n}</td>
                   <td className="numeros">{f.final.ruc || <ChipRuc estado={f.rucEstado} />}</td>
                   <td><div className="ellipsis" title={f.final.razon}>{f.final.razon || f.final.nombre_archivo}</div>
-                    {!f.final.activo && <span className="chip chip--alerta">{f.final.estado_sunat}</span>}</td>
+                    {!f.final.activo && <span className="chip chip--alerta">{f.final.estado_sunat}</span>}
+                    {f.rucEstado === 'DESCARTADA' && <span className="chip chip--gris">Descartada</span>}</td>
+                  {conTipo && <td><div className="ellipsis tenue" style={{ maxWidth: 160, fontSize: 12 }} title={f.final.tipo}>{f.final.tipo || '—'}</div></td>}
                   <td><div className="ellipsis" style={{ maxWidth: 200 }}>{f.final.representante || <span className="tenue">—</span>}</div></td>
                   <td className="numeros">{f.final.dni || <span className="tenue">—</span>}</td>
                   <td className="numeros">{f.final.telefono || <span className="tenue">—</span>}</td>
@@ -85,11 +130,11 @@ export function Empresas({ trabajo, onCambio, onRecargar }: { trabajo: Trabajo; 
                   <td>{f.faltan.length ? <span className="chip chip--ambar" title={f.faltan.join(', ')}>{f.faltan.length}</span> : <span className="chip chip--ok">✓</span>}</td>
                 </tr>
                 {abierta === f.id && (
-                  <tr><td colSpan={11} style={{ background: '#fbfdf8' }}><Editor trabajoId={trabajo.id} fila={f} onCambio={onCambio} onCerrar={() => setAbierta(null)} onRecargar={onRecargar} /></td></tr>
+                  <tr><td colSpan={conTipo ? 12 : 11} style={{ background: '#fbfdf8' }}><Editor trabajoId={trabajo.id} fila={f} onCambio={onCambio} onCerrar={() => setAbierta(null)} onRecargar={onRecargar} /></td></tr>
                 )}
               </Fragment>
             ))}
-            {!visibles.length && <tr><td colSpan={11} className="tenue" style={{ padding: 20, textAlign: 'center' }}>No hay empresas con estos filtros.</td></tr>}
+            {!visibles.length && <tr><td colSpan={conTipo ? 12 : 11} className="tenue" style={{ padding: 20, textAlign: 'center' }}>No hay empresas con estos filtros.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -183,15 +228,26 @@ function Editor({ trabajoId, fila, onCambio, onCerrar, onRecargar }: { trabajoId
           )}
         </fieldset>
 
+        {f.otros_contactos.length > 0 && (
+          <div className="campo">
+            <span className="etiqueta">Otras personas (también van al CRM)</span>
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }} className="suave">
+              {f.otros_contactos.map((k) => (
+                <li key={k.nombre}><b>{k.nombre}</b> · {k.cargo}{k.dni ? ` · DNI ${k.dni}` : ''}{k.telefono ? ` · ${k.telefono}` : ''}{k.correo ? ` · ${k.correo}` : ''}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         <div className="rejilla" style={{ gridTemplateColumns: '1fr 1fr' }}>
           <div className="campo">
-            <label className="etiqueta" htmlFor={`tel-${fila.id}`}>Teléfono</label>
+            <label className="etiqueta" htmlFor={`tel-${fila.id}`}>Teléfono principal</label>
             <input id={`tel-${fila.id}`} className="entrada entrada--chica numeros" list={`tels-${fila.id}`} value={telefono} onChange={(e) => setTelefono(e.target.value)} placeholder="9XXXXXXXX" />
             <datalist id={`tels-${fila.id}`}>{telefonos.map((t) => <option key={t} value={t} />)}</datalist>
-            {telefonos.length > 1 && <span className="tenue" style={{ fontSize: 12 }}>De SUNAT: {telefonos.join(', ')}</span>}
+            {telefonos.length > 1 && <span className="tenue" style={{ fontSize: 12 }}>Todos van al CRM: {telefonos.join(', ')}</span>}
           </div>
           <div className="campo">
-            <label className="etiqueta" htmlFor={`correo-${fila.id}`}>Correo</label>
+            <label className="etiqueta" htmlFor={`correo-${fila.id}`}>Correo principal</label>
             <input id={`correo-${fila.id}`} className="entrada entrada--chica" list={`correos-${fila.id}`} value={correo} onChange={(e) => setCorreo(e.target.value)} />
             <datalist id={`correos-${fila.id}`}>{correos.map((t) => <option key={t} value={t} />)}</datalist>
           </div>

@@ -5,7 +5,7 @@ import { useSesion } from '../sesion';
 const ACCIONES: Record<string, string> = {
   INGRESO: 'Entró', INGRESO_SIN_ACCESO: 'Intentó entrar sin acceso', ACCESO_DADO: 'Dio acceso', ACCESO_CAMBIADO: 'Cambió un acceso',
   BASE_SUBIDA: 'Subió una base', BASE_BORRADA: 'Borró una base', CONSULTA_INICIADA: 'Inició una consulta a SUNAT',
-  CONSULTA_TERMINADA: 'Terminó una consulta a SUNAT', EXCEL_DESCARGADO: 'Descargó un Excel', PADRON_ACTUALIZADO: 'Actualizó el padrón', RUC_CAMBIADO: 'Cambió el RUC de una empresa',
+  CONSULTA_TERMINADA: 'Terminó una consulta a SUNAT', EXCEL_DESCARGADO: 'Descargó un Excel', PADRON_ACTUALIZADO: 'Actualizó el padrón', RUC_CAMBIADO: 'Cambió el RUC de una empresa', EMPRESAS_DESCARTADAS: 'Descartó empresas', EMPRESAS_RECUPERADAS: 'Recuperó empresas',
 };
 
 function resumen(a: Actividad) {

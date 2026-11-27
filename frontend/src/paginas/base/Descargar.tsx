@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { Trabajo } from '../../api';
 
-const CONFIABLES = ['DEL_ARCHIVO', 'EXACTO', 'ELEGIDO'];
+const CONFIABLES = ['DEL_ARCHIVO', 'EXACTO', 'ELEGIDO', 'COINCIDENCIA'];
 const SEGMENTOS: Record<string, string> = {
   todos: 'Todas', micro: 'Solo micro', pyme: 'Solo pymes (pequeña y mediana)', grande: 'Solo grandes', sin: 'Sin segmento',
 };

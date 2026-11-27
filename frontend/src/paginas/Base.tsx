@@ -9,7 +9,7 @@ import { Empresas } from './base/Empresas';
 import { Descargar } from './base/Descargar';
 
 const DUDOSOS = ['PROBABLE', 'VARIOS', 'NO_ENCONTRADO', 'INVALIDO'];
-const CONFIABLES = ['DEL_ARCHIVO', 'EXACTO', 'ELEGIDO'];
+const CONFIABLES = ['DEL_ARCHIVO', 'EXACTO', 'ELEGIDO', 'COINCIDENCIA'];
 type Pestana = 'ruc' | 'sunat' | 'empresas' | 'descargar';
 
 export function Base() {
@@ -124,7 +124,7 @@ export function Base() {
             </button>
             <button role="tab" aria-selected={activa === 'descargar'} onClick={() => setPestana('descargar')}>Descargar</button>
           </div>
-          {activa === 'ruc' && <RevisarRuc trabajo={t} onCambio={actualizarFila} onListo={() => setPestana('sunat')} />}
+          {activa === 'ruc' && <RevisarRuc trabajo={t} onCambio={actualizarFila} onListo={() => setPestana('sunat')} onRecargar={cargar} />}
           {activa === 'sunat' && <ConsultarSunat trabajo={t} onIniciada={() => { cargar(); setPestana('empresas'); }} />}
           {activa === 'empresas' && <Empresas trabajo={t} onCambio={actualizarFila} onRecargar={cargar} />}
           {activa === 'descargar' && <Descargar trabajo={t} onDescargado={() => setTimeout(cargar, 1500)} />}

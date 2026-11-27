@@ -18,6 +18,7 @@ const RUC: Record<EstadoRuc, [string, string]> = {
   DEL_ARCHIVO: ['Del archivo', 'chip--ok'],
   EXACTO: ['Exacto', 'chip--ok'],
   ELEGIDO: ['Elegido', 'chip--ok'],
+  COINCIDENCIA: ['Coincidencia', 'chip--ok'],
   PROBABLE: ['Probable', 'chip--ambar'],
   VARIOS: ['Varios posibles', 'chip--ambar'],
   NO_ENCONTRADO: ['No encontrado', 'chip--alerta'],
