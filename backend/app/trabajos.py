@@ -61,6 +61,8 @@ def final(f: dict) -> dict:
         dep, prov, dist = (nombre_propio(o.get(k, '')) for k in ('departamento', 'provincia', 'distrito'))
 
     tel_archivo, correo_archivo = telefono(o.get('telefono')), (o.get('correo') or '').strip().lower()
+    if not re.fullmatch(r'[^@\s]+@[^@\s]+\.[a-z]{2,}', correo_archivo):
+        correo_archivo = ''
     tel = d['telefono'] if 'telefono' in d else (tel_archivo or (tels[0] if tels else ''))
     cor = d['correo'] if 'correo' in d else (correo_archivo or (correos[0] if correos else ''))
 
@@ -92,8 +94,8 @@ def final(f: dict) -> dict:
         'lineas': total, 'operador': operador, 'lineas_por': lineas_por,
         'segmento': segmento, 'segmento_estimado': estimado,
         'trabajadores': trab.get('trabajadores'), 'periodo': trab.get('periodo', ''),
-        'estado_sunat': ' · '.join(x for x in (p.get('estado'), p.get('condicion')) if x),
-        'activo': (p.get('estado') or 'ACTIVO') == 'ACTIVO',
+        'estado_sunat': ' · '.join(x for x in (p.get('estado') or o.get('estado', '').upper(), p.get('condicion') or o.get('condicion', '').upper()) if x),
+        'activo': (p.get('estado') or o.get('estado', '').upper() or 'ACTIVO') == 'ACTIVO',
         'otros_telefonos': [t for t in tels if t != tel][:4], 'otros_correos': [c for c in correos if c != cor][:3],
         'direccion': p.get('direccion', ''), 'nombre_archivo': o.get('razon', ''),
         'como_ruc': ETIQUETA_RUC.get(f['ruc_estado'] or '', ''), 'observacion': d.get('observacion', ''),
@@ -179,12 +181,12 @@ def consultar(tid: str, usuario_id: int):
     try:
         t = db.uno('SELECT endpoints FROM trabajos WHERE id = %s', (tid,))
         endpoints = t['endpoints'] or list(apiconsulta.ENDPOINTS)
-        filas = db.todos("SELECT id, ruc, sunat, padron FROM filas WHERE trabajo_id = %s AND NOT consultada AND (datos->>'_consultar')::boolean ORDER BY n", (tid,))
+        filas = db.todos("SELECT id, ruc, sunat, padron, original FROM filas WHERE trabajo_id = %s AND NOT consultada AND (datos->>'_consultar')::boolean ORDER BY n", (tid,))
         _estado(tid, 'CONSULTANDO', 'Consultando SUNAT…', 0, len(filas))
         with httpx.Client(timeout=25) as cliente:
             for i, f in enumerate(filas, start=1):
                 s = dict(f['sunat'] or {})
-                if not f['padron']:  # RUC escrito a mano: razón social, estado y ubicación desde SUNAT
+                if _falta_empresa(f):  # RUC sin datos básicos: razón social, estado y ubicación desde SUNAT
                     e = apiconsulta.empresa(apiconsulta.consultar(cliente, f['ruc'], 'empresa', usuario_id, tid))
                     if e and e.get('razon'):
                         db.ejecutar('UPDATE filas SET padron = %s WHERE id = %s', (db.j(e), f['id']))
@@ -205,6 +207,11 @@ def consultar(tid: str, usuario_id: int):
     except Exception as e:
         log.exception('Falló la consulta a SUNAT')
         _estado(tid, 'REVISION', f'Se detuvo por un error ({e}). Las empresas que faltan se pueden consultar después.')
+
+
+def _falta_empresa(f: dict) -> bool:
+    """Sin datos del padrón ni razón social en el archivo (p. ej. un RUC escrito a mano)"""
+    return not f['padron'] and not (f.get('original') or {}).get('razon')
 
 
 def reanudar():
@@ -324,9 +331,9 @@ class Consulta(BaseModel):
 
 def _por_consultar(tid: str, dto: Consulta) -> list[dict]:
     estados = list(CONFIABLES) + (['PROBABLE'] if dto.incluirProbables else [])
-    filas = db.todos('SELECT id, ruc, padron FROM filas WHERE trabajo_id = %s AND ruc_estado = ANY(%s) AND NOT consultada ORDER BY n', (tid, estados))
+    filas = db.todos('SELECT id, ruc, padron, original FROM filas WHERE trabajo_id = %s AND ruc_estado = ANY(%s) AND NOT consultada ORDER BY n', (tid, estados))
     filas = [f for f in filas if f['ruc'] and ruc_valido(f['ruc'])
-             and not (dto.excluirInactivas and f['padron'] and f['padron'].get('estado') not in (None, '', 'ACTIVO'))]
+             and not (dto.excluirInactivas and ((f['padron'] or {}).get('estado') or (f['original'] or {}).get('estado', '').upper()) not in ('', 'ACTIVO'))]
     return filas[:dto.limite] if dto.limite else filas
 
 
@@ -339,7 +346,7 @@ def iniciar_consulta(tid: str, dto: Consulta, u: dict = Depends(usuario_actual))
     if not endpoints:
         raise HTTPException(400, 'Elige al menos un dato para consultar')
     filas = _por_consultar(tid, dto)
-    gasto = sum(len(apiconsulta.faltan(f['ruc'], endpoints + ([] if f['padron'] else ['empresa']))) for f in filas)
+    gasto = sum(len(apiconsulta.faltan(f['ruc'], endpoints + (['empresa'] if _falta_empresa(f) else []))) for f in filas)
     usadas = apiconsulta.usadas_mes()
     quedan = max(0, config.APICONSULTA_LIMITE_MES - usadas)
     estimado = {'empresas': len(filas), 'consultas': gasto, 'usadasMes': usadas, 'limiteMes': config.APICONSULTA_LIMITE_MES,

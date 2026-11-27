@@ -12,11 +12,11 @@ OPERADORES = ['Movistar', 'Claro', 'Entel', 'Bitel']
 
 # Columnas que se reconocen en la base que llega (el resto se conserva tal cual)
 ALIAS = {
-    'ruc': ['RUC', 'NRO RUC', 'NUMERO DE RUC', 'N RUC'],
+    'ruc': ['RUC', 'NRO RUC', 'NUMERO DE RUC', 'NUMERO RUC', 'N RUC', 'NUM RUC'],
     'razon': ['RAZON SOCIAL', 'CLIENTE FINAL', 'CLIENTE', 'EMPRESA', 'NOMBRE', 'NOMBRE O RAZON SOCIAL'],
     'contacto': ['REPRESENTANTEL LEGAL SUNAT', 'REPRESENTANTE LEGAL SUNAT', 'REPRESENTANTE LEGAL', 'REPRESENTANTE', 'CONTACTO PRESUNTO', 'CONTACTO'],
     'dni': ['DNI', 'DNI REPRESENTANTE', 'DOCUMENTO'],
-    'telefono': ['TELEFONO', 'CELULAR', 'TELEFONO CONTACTO', 'MOVIL'],
+    'telefono': ['TELEFONO', 'TELEFONOS', 'CELULAR', 'TELEFONO CONTACTO', 'MOVIL'],
     'correo': ['CORREO', 'EMAIL', 'E MAIL', 'CORREO ELECTRONICO'],
     'departamento': ['DEPARTAMENTO'], 'provincia': ['PROVINCIA'], 'distrito': ['DISTRITO'],
     'lineas': ['CANTIDAD DE LINEAS', 'LINEAS', 'NRO LINEAS', 'TOTAL LINEAS'],
@@ -24,6 +24,8 @@ ALIAS = {
     'lineas_movistar': ['LINEAS MOVISTAR', 'MOVISTAR'], 'lineas_claro': ['LINEAS CLARO', 'CLARO'],
     'lineas_entel': ['LINEAS ENTEL', 'ENTEL'], 'lineas_bitel': ['LINEAS BITEL', 'BITEL'],
     'segmento': ['SEGMENTO', 'TAMANO', 'TIPO DE EMPRESA'],
+    'estado': ['ESTADO', 'ESTADO DEL CONTRIBUYENTE', 'ESTADO SUNAT'],
+    'condicion': ['CONDICION', 'CONDICION DEL CONTRIBUYENTE', 'CONDICION DE DOMICILIO'],
 }
 
 
@@ -31,8 +33,13 @@ class ErrorArchivo(Exception):
     pass
 
 
+VACIOS = {'-', '--', '---', '.', 'N/A', 'NA', 'S/N', 'SN', 'NO TIENE', 'NO REGISTRA', 'NINGUNO', 'SIN DATO', 'SIN DATOS', 'NULL'}
+
+
 def _valor(v):
     if v is None:
+        return ''
+    if isinstance(v, str) and v.strip().upper() in VACIOS:
         return ''
     if isinstance(v, float) and v.is_integer():
         return str(int(v))
@@ -50,15 +57,18 @@ def leer(contenido: bytes) -> tuple[list[dict], list[str]]:
     hoja = libro.worksheets[0]
     filas = [list(f) for f in hoja.iter_rows(values_only=True)]
     libro.close()
+    # Encabezados comparados sin espacios: "NumeroRuc" = "NÚMERO RUC", "Nombre ó RazonSocial" = "NOMBRE O RAZÓN SOCIAL"
+    clave = lambda x: normal(x).replace(' ', '')
+    conocidos = {clave(a) for v in ALIAS.values() for a in v}
+    principales = {clave(a) for a in ALIAS['ruc'] + ALIAS['razon']}
     # El encabezado es la primera fila (de las 10 primeras) donde se reconoce RUC o razón social
-    conocidos = {a for v in ALIAS.values() for a in v}
-    inicio = next((i for i, f in enumerate(filas[:10]) if {'RUC', 'RAZON SOCIAL', 'CLIENTE FINAL', 'CLIENTE', 'EMPRESA'} & {normal(x) for x in f}), None)
+    inicio = next((i for i, f in enumerate(filas[:10]) if principales & {clave(x) for x in f}), None)
     if inicio is None:
         raise ErrorArchivo('No encontré la columna RUC ni RAZÓN SOCIAL / CLIENTE FINAL en las primeras filas.')
-    enc = [normal(x) for x in filas[inicio]]
+    enc = [clave(x) for x in filas[inicio]]
     mapa: dict[str, int] = {}
     for campo, alias in ALIAS.items():
-        for a in alias:
+        for a in map(clave, alias):
             if a in enc and enc.index(a) not in mapa.values():
                 mapa[campo] = enc.index(a)
                 break
