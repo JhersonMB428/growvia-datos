@@ -68,3 +68,17 @@ def test_leer_excel():
     filas, extras = excel.leer(b.getvalue())
     assert filas[0]['original']['razon'] == 'ACME SAC' and filas[0]['original']['lineas_movistar'] == '5'
     assert extras == ['Sector'] and filas[0]['n'] == 3
+
+
+def test_consulta_masiva_sunat():
+    """Formato de la consulta masiva de SUNAT: encabezados pegados y '-' cuando no hay dato"""
+    libro = openpyxl.Workbook()
+    h = libro.active
+    h.append(['NumeroRuc', 'Nombre ó RazonSocial', 'Departamento', 'Telefono', 'Correo', 'Principal- CIIU'])
+    h.append([20100047218, 'BANCO DE PRUEBA', 'LIMA', '-', '-', 'BANCA'])
+    b = io.BytesIO()
+    libro.save(b)
+    filas, extras = excel.leer(b.getvalue())
+    o = filas[0]['original']
+    assert o['ruc'] == '20100047218' and o['razon'] == 'BANCO DE PRUEBA' and o['telefono'] == '' and o['correo'] == ''
+    assert extras == ['Principal- CIIU']
