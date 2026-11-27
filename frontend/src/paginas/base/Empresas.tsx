@@ -228,15 +228,26 @@ function Editor({ trabajoId, fila, onCambio, onCerrar, onRecargar }: { trabajoId
           )}
         </fieldset>
 
+        {f.otros_contactos.length > 0 && (
+          <div className="campo">
+            <span className="etiqueta">Otras personas (también van al CRM)</span>
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }} className="suave">
+              {f.otros_contactos.map((k) => (
+                <li key={k.nombre}><b>{k.nombre}</b> · {k.cargo}{k.dni ? ` · DNI ${k.dni}` : ''}{k.telefono ? ` · ${k.telefono}` : ''}{k.correo ? ` · ${k.correo}` : ''}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         <div className="rejilla" style={{ gridTemplateColumns: '1fr 1fr' }}>
           <div className="campo">
-            <label className="etiqueta" htmlFor={`tel-${fila.id}`}>Teléfono</label>
+            <label className="etiqueta" htmlFor={`tel-${fila.id}`}>Teléfono principal</label>
             <input id={`tel-${fila.id}`} className="entrada entrada--chica numeros" list={`tels-${fila.id}`} value={telefono} onChange={(e) => setTelefono(e.target.value)} placeholder="9XXXXXXXX" />
             <datalist id={`tels-${fila.id}`}>{telefonos.map((t) => <option key={t} value={t} />)}</datalist>
-            {telefonos.length > 1 && <span className="tenue" style={{ fontSize: 12 }}>De SUNAT: {telefonos.join(', ')}</span>}
+            {telefonos.length > 1 && <span className="tenue" style={{ fontSize: 12 }}>Todos van al CRM: {telefonos.join(', ')}</span>}
           </div>
           <div className="campo">
-            <label className="etiqueta" htmlFor={`correo-${fila.id}`}>Correo</label>
+            <label className="etiqueta" htmlFor={`correo-${fila.id}`}>Correo principal</label>
             <input id={`correo-${fila.id}`} className="entrada entrada--chica" list={`correos-${fila.id}`} value={correo} onChange={(e) => setCorreo(e.target.value)} />
             <datalist id={`correos-${fila.id}`}>{correos.map((t) => <option key={t} value={t} />)}</datalist>
           </div>

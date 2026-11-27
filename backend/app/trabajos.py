@@ -23,7 +23,7 @@ router = APIRouter(prefix='/api', tags=['trabajos'])
 with open(os.path.join(os.path.dirname(__file__), 'ubigeo.json'), encoding='utf-8') as _f:
     UBIGEO: dict[str, list[str]] = json.load(_f)
 
-CONFIABLES = ('DEL_ARCHIVO', 'EXACTO', 'ELEGIDO')
+CONFIABLES = ('DEL_ARCHIVO', 'EXACTO', 'ELEGIDO', 'COINCIDENCIA')
 DUDOSOS = ('PROBABLE', 'VARIOS', 'NO_ENCONTRADO', 'INVALIDO')
 SEGMENTOS = ('Micro', 'Pequeña', 'Mediana', 'Grande')
 _hilos: dict[str, threading.Thread] = {}
@@ -79,12 +79,20 @@ def final(f: dict) -> dict:
     estimado = apiconsulta.tamano(trab.get('trabajadores'))
     segmento = d.get('segmento') or (o.get('segmento') if o.get('segmento') in SEGMENTOS else '') or estimado
 
+    contacto_archivo = {'nombre': nombre_propio(o.get('contacto', '')), 'dni': solo_digitos(o.get('dni'))[:8], 'cargo': 'Contacto de la base',
+                        'telefono': tel_archivo, 'correo': correo_archivo}
     if 'representante' in d:
         nombre_rep, dni, cargo = d['representante'], d.get('dni', ''), d.get('cargo', '')
     elif rep:
         nombre_rep, dni, cargo = rep['nombre'], rep['dni'], rep['cargo']
     else:
-        nombre_rep, dni, cargo = nombre_propio(o.get('contacto', '')), solo_digitos(o.get('dni'))[:8], ''
+        nombre_rep, dni, cargo = contacto_archivo['nombre'], contacto_archivo['dni'], ''
+
+    # Todas las demás personas: los otros representantes de SUNAT y el contacto que traía la base
+    otros = [{'nombre': r['nombre'], 'dni': r['dni'], 'cargo': r['cargo'] or 'Representante legal', 'telefono': '', 'correo': ''}
+             for r in reps if r['nombre'] != nombre_rep]
+    if contacto_archivo['nombre'] and contacto_archivo['nombre'] != nombre_rep and all(x['nombre'] != contacto_archivo['nombre'] for x in otros):
+        otros.append(contacto_archivo)
 
     return {
         'ruc': f['ruc'] or '', 'razon': p.get('razon') or o.get('razon', ''),
@@ -96,7 +104,9 @@ def final(f: dict) -> dict:
         'trabajadores': trab.get('trabajadores'), 'periodo': trab.get('periodo', ''),
         'estado_sunat': ' · '.join(x for x in (p.get('estado') or o.get('estado', '').upper(), p.get('condicion') or o.get('condicion', '').upper()) if x),
         'activo': (p.get('estado') or o.get('estado', '').upper() or 'ACTIVO') == 'ACTIVO',
-        'otros_telefonos': [t for t in tels if t != tel][:4], 'otros_correos': [c for c in correos if c != cor][:3],
+        'otros_telefonos': [t for t in dict.fromkeys(tels + [tel_archivo]) if t and t != tel],
+        'otros_correos': [c for c in dict.fromkeys(correos + [correo_archivo]) if c and c != cor],
+        'otros_contactos': otros,
         'direccion': p.get('direccion', ''), 'nombre_archivo': o.get('razon', ''), 'tipo': o.get('tipo', '').upper(),
         'como_ruc': ETIQUETA_RUC.get(f['ruc_estado'] or '', ''), 'observacion': d.get('observacion', ''),
         'extra': f['extra'] or {},
@@ -106,7 +116,7 @@ def final(f: dict) -> dict:
 ETIQUETA_RUC = {
     'DEL_ARCHIVO': 'Venía en el archivo', 'EXACTO': 'Nombre exacto en SUNAT', 'ELEGIDO': 'Elegido a mano',
     'PROBABLE': 'Probable (revisar)', 'VARIOS': 'Varios posibles', 'NO_ENCONTRADO': 'No encontrado', 'INVALIDO': 'RUC no válido',
-    'DESCARTADA': 'Descartada',
+    'DESCARTADA': 'Descartada', 'COINCIDENCIA': 'Coincidencia por nombre (se agregaron todas)',
 }
 
 
@@ -319,6 +329,44 @@ def elegir_ruc(tid: str, fid: int, dto: ElegirRuc, u: dict = Depends(usuario_act
     if cambio and f['ruc']:
         db.registrar(u['id'], 'RUC_CAMBIADO', {'trabajo': tid, 'fila': fid, 'antes': f['ruc'], 'ruc': ruc})
     return {'ok': True}
+
+
+class Coincidencias(BaseModel):
+    ids: list[int] | None = None   # vacío = todas las filas con varias coincidencias
+
+
+@router.post('/trabajos/{tid}/coincidencias')
+def agregar_coincidencias(tid: str, dto: Coincidencias, u: dict = Depends(usuario_actual)):
+    """Cada coincidencia del padrón entra como empresa aparte (para no revisar una por una)"""
+    t = _trabajo(tid)
+    if t['estado'] in ('BUSCANDO_RUC', 'CARGADO', 'CONSULTANDO'):
+        raise HTTPException(400, 'Espera a que termine el proceso')
+    sql = "SELECT * FROM filas WHERE trabajo_id = %s AND ruc_estado IN ('PROBABLE', 'VARIOS') AND jsonb_array_length(opciones) > 0"
+    filas = db.todos(sql + (' AND id = ANY(%s)' if dto.ids else '') + ' ORDER BY n', (tid, dto.ids) if dto.ids else (tid,))
+    if not filas:
+        raise HTTPException(400, 'No hay empresas con coincidencias por agregar')
+    existentes = {r['ruc'] for r in db.todos('SELECT ruc FROM filas WHERE trabajo_id = %s AND ruc_estado = ANY(%s)', (tid, list(CONFIABLES)))}
+    agregadas = ya_estaban = 0
+    with db.conexion() as c:
+        for f in filas:
+            nuevas = [o for o in f['opciones'] if ruc_valido(o['ruc']) and o['ruc'] not in existentes]
+            if not nuevas:  # todas sus coincidencias ya están en la base
+                c.execute("UPDATE filas SET datos = datos || jsonb_build_object('_antes', ruc_estado), ruc_estado = 'DESCARTADA' WHERE id = %s", (f['id'],))
+                ya_estaban += 1
+                continue
+            primera, resto = nuevas[0], nuevas[1:]
+            c.execute("UPDATE filas SET ruc = %s, ruc_estado = 'COINCIDENCIA', padron = %s, consultada = false, sunat = NULL WHERE id = %s",
+                      (primera['ruc'], db.j(primera), f['id']))
+            # Las copias no llevan el contacto del archivo: no se sabe a cuál de las empresas pertenece
+            original = {k: v for k, v in (f['original'] or {}).items() if k not in ('contacto', 'dni', 'telefono', 'correo', 'ruc')}
+            for o in resto:
+                c.execute("INSERT INTO filas (trabajo_id, n, original, extra, ruc, ruc_estado, padron, datos) VALUES (%s, %s, %s, %s, %s, 'COINCIDENCIA', %s, %s)",
+                          (tid, f['n'], db.j(original), db.j(f['extra'] or {}), o['ruc'], db.j(o), db.j({'_de': f['id']})))
+            existentes.update(o['ruc'] for o in nuevas)
+            agregadas += len(nuevas)
+        c.execute('UPDATE trabajos SET total = (SELECT count(*) FROM filas WHERE trabajo_id = %s), actualizado_at = now() WHERE id = %s', (tid, tid))
+    db.registrar(u['id'], 'COINCIDENCIAS_AGREGADAS', {'trabajo': tid, 'empresas': agregadas, 'filas': len(filas)})
+    return {'filas': len(filas), 'empresas': agregadas, 'yaEstaban': ya_estaban}
 
 
 class DescartarVarias(BaseModel):

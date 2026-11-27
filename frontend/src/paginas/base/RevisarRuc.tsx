@@ -11,9 +11,25 @@ const EXPLICA: Record<string, string> = {
   INVALIDO: 'El RUC del archivo no es válido (dígito verificador). Corrígelo o descártala.',
 };
 
-export function RevisarRuc({ trabajo, onCambio, onListo }: { trabajo: Trabajo; onCambio: (f: Fila) => void; onListo: () => void }) {
+export function RevisarRuc({ trabajo, onCambio, onListo, onRecargar }: { trabajo: Trabajo; onCambio: (f: Fila) => void; onListo: () => void; onRecargar: () => void }) {
   const dudosas = trabajo.filas.filter((f) => DUDOSOS.includes(f.rucEstado));
-  const resueltas = trabajo.filas.filter((f) => f.rucEstado === 'ELEGIDO' || f.rucEstado === 'DESCARTADA').length;
+  const resueltas = trabajo.filas.filter((f) => ['ELEGIDO', 'DESCARTADA', 'COINCIDENCIA'].includes(f.rucEstado)).length;
+  const conOpciones = dudosas.filter((f) => (f.rucEstado === 'PROBABLE' || f.rucEstado === 'VARIOS') && f.opciones.length);
+  const totalOpciones = conOpciones.reduce((s, f) => s + f.opciones.length, 0);
+  const [aviso, setAviso] = useState('');
+  const [ocupado, setOcupado] = useState(false);
+
+  async function agregarTodas(ids?: number[]) {
+    const n = ids ? trabajo.filas.find((f) => f.id === ids[0])?.opciones.length ?? 0 : totalOpciones;
+    if (!confirm(`Se agregarán hasta ${n} empresas (cada coincidencia como empresa aparte). Consultar cada una en SUNAT gasta 3 consultas. ¿Continuar?`)) return;
+    setOcupado(true); setAviso('');
+    try {
+      const r = await api<{ empresas: number; yaEstaban: number }>(`/trabajos/${trabajo.id}/coincidencias`, { cuerpo: { ids: ids ?? null } });
+      setAviso(`Se agregaron ${r.empresas} empresas.${r.yaEstaban ? ` ${r.yaEstaban} ya estaban en la base y se descartaron para no duplicar.` : ''}`);
+      onRecargar();
+    } catch (e) { setAviso(textoError(e)); }
+    finally { setOcupado(false); }
+  }
 
   if (!dudosas.length) {
     return (
@@ -29,14 +45,21 @@ export function RevisarRuc({ trabajo, onCambio, onListo }: { trabajo: Trabajo; o
         Estas empresas no se pudieron identificar con seguridad. Elige el RUC correcto, escríbelo, o descártala.
         Las que no revises no se consultan ni se descargan (salvo que elijas incluir las probables).
       </p>
+      {conOpciones.length > 0 && (
+        <div className="nota fila fila--entre">
+          <span><b>¿No quieres revisar una por una?</b> Agrega todas las coincidencias como empresas aparte: {conOpciones.length} nombres con {totalOpciones} coincidencias en SUNAT. Las que ya estén en la base no se duplican.</span>
+          <button type="button" className="boton boton--chico" disabled={ocupado} onClick={() => agregarTodas()}>Agregar todas las coincidencias</button>
+        </div>
+      )}
+      {aviso && <div className="aviso" role="status">{aviso}</div>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {dudosas.map((f) => <Dudosa key={f.id} trabajoId={trabajo.id} fila={f} onCambio={onCambio} />)}
+        {dudosas.map((f) => <Dudosa key={f.id} trabajoId={trabajo.id} fila={f} onCambio={onCambio} onTodas={() => agregarTodas([f.id])} />)}
       </div>
     </>
   );
 }
 
-function Dudosa({ trabajoId, fila, onCambio }: { trabajoId: string; fila: Fila; onCambio: (f: Fila) => void }) {
+function Dudosa({ trabajoId, fila, onCambio, onTodas }: { trabajoId: string; fila: Fila; onCambio: (f: Fila) => void; onTodas: () => void }) {
   const [elegido, setElegido] = useState(fila.rucEstado === 'PROBABLE' ? fila.final.ruc : '');
   const [escrito, setEscrito] = useState('');
   const [error, setError] = useState('');
@@ -87,6 +110,7 @@ function Dudosa({ trabajoId, fila, onCambio }: { trabajoId: string; fila: Fila; 
           placeholder={fila.opciones.length ? 'U otro RUC…' : 'RUC de 11 dígitos'} value={escrito}
           onChange={(e) => setEscrito(e.target.value.replace(/\D/g, '').slice(0, 11))} />
         <button type="button" className="boton" disabled={ocupado || ruc.length !== 11} onClick={() => enviar({ ruc })}>Usar este RUC</button>
+        {fila.opciones.length > 1 && <button type="button" className="boton-2" disabled={ocupado} onClick={onTodas}>Agregar las {fila.opciones.length}</button>}
         <button type="button" className="boton-2" disabled={ocupado} onClick={() => enviar({ descartar: true })}>Descartar</button>
         <a href="https://e-consultaruc.sunat.gob.pe/cl-ti-itmrconsruc/FrameCriterioBusquedaWeb.jsp" target="_blank" rel="noopener noreferrer" style={{ fontSize: 13 }}>
           Buscar en SUNAT ↗

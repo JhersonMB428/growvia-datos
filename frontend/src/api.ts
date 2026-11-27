@@ -30,7 +30,8 @@ export const textoError = (e: unknown) => (e instanceof ErrorApi ? e.message : '
 // ───────── Tipos ─────────
 export type Usuario = { id: number; email: string; nombre: string; rol: 'ADMIN' | 'USUARIO' };
 export type EstadoTrabajo = 'CARGADO' | 'BUSCANDO_RUC' | 'REVISAR_RUC' | 'CONSULTANDO' | 'REVISION' | 'ERROR';
-export type EstadoRuc = 'DEL_ARCHIVO' | 'EXACTO' | 'PROBABLE' | 'VARIOS' | 'NO_ENCONTRADO' | 'INVALIDO' | 'ELEGIDO' | 'DESCARTADA';
+export type EstadoRuc = 'DEL_ARCHIVO' | 'EXACTO' | 'PROBABLE' | 'VARIOS' | 'NO_ENCONTRADO' | 'INVALIDO' | 'ELEGIDO' | 'COINCIDENCIA' | 'DESCARTADA';
+export type Persona = { nombre: string; cargo: string; dni: string; telefono: string; correo: string };
 
 export type TrabajoResumen = {
   id: string; nombre: string; archivo: string; estado: EstadoTrabajo; mensaje: string | null; progreso: number; total: number;
@@ -42,7 +43,7 @@ export type Final = {
   ruc: string; razon: string; representante: string; dni: string; cargo: string; telefono: string; correo: string;
   departamento: string; provincia: string; distrito: string; lineas: number | null; operador: string; lineas_por: Record<string, number>;
   segmento: string; segmento_estimado: string; trabajadores: number | null; periodo: string; estado_sunat: string; activo: boolean;
-  otros_telefonos: string[]; otros_correos: string[]; direccion: string; nombre_archivo: string; tipo: string; como_ruc: string; observacion: string;
+  otros_telefonos: string[]; otros_correos: string[]; otros_contactos: Persona[]; direccion: string; nombre_archivo: string; tipo: string; como_ruc: string; observacion: string;
 };
 export type Fila = {
   id: number; n: number; rucEstado: EstadoRuc; opciones: OpcionRuc[]; consultada: boolean; representantes: Representante[];
